@@ -412,6 +412,34 @@ func (n *EvalValidateResource) Validate(ctx EvalContext) error {
 			for _, traversal := range cfg.Managed.IgnoreChanges {
 				moreDiags := schema.StaticValidateTraversal(traversal)
 				diags = diags.Append(moreDiags)
+				if diags.HasErrors() {
+					continue
+				}
+
+				// first check to see if this assigned in the config
+				v, _ := traversal.TraverseRel(configVal)
+				if !v.IsNull() {
+					// it's assigned, so we can also assume it's not computed-only
+					continue
+				}
+
+				// We can't ignore changes that don't exist in the configuration.
+				// We're not checking specifically if the traversal resolves to
+				// a computed-only value, but we can hint to the user that it
+				// might also be the case.
+				sourceRange := traversal.SourceRange()
+				diags = diags.Append(&hcl.Diagnostic{
+					Severity: hcl.DiagError,
+					Summary:  "Cannot ignore argument not set in the configuration",
+					Detail: fmt.Sprintf("The ignore_changes argument is not set in the configuration.\n" +
+						"The ignore_changes mechanism only applies to changes " +
+						"within the configuration, and must be used with " +
+						"arguments set in the configuration and not computed by " +
+						"the provider.",
+					),
+					Subject: &sourceRange,
+				})
+				return diags.Err()
 			}
 		}
 
